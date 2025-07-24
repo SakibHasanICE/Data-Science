@@ -4,16 +4,13 @@ import PyPDF2
 import requests
 from dotenv import load_dotenv
 
-# ========================
+
 # Load environment variables
-# ========================
+
 load_dotenv()
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 MODEL_NAME = "deepseek/deepseek-r1-distill-llama-70b:free"
 
-# ========================
-# Helper Functions
-# ========================
 def extract_text_from_pdf(pdf_file):
     pdf_reader = PyPDF2.PdfReader(pdf_file)
     full_text = ""
@@ -64,9 +61,9 @@ def ask_deepseek(question, context):
     else:
         return f"Error: {response.status_code} - {response.text}"
 
-# ========================
+
 # Streamlit UI
-# ========================
+
 st.set_page_config(page_title="📄 PDF Chatbot with DeepSeek", layout="wide")
 st.title("📄🤖 PDF Chatbot using DeepSeek (via OpenRouter)")
 
