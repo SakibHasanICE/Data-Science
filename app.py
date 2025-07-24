@@ -69,6 +69,8 @@ st.title("📄🤖 PDF Chatbot using DeepSeek (via OpenRouter)")
 
 uploaded_file = st.file_uploader("Upload a PDF file", type="pdf")
 
+# main logic
+
 if uploaded_file:
     with st.spinner("Extracting text from PDF..."):
         full_text = extract_text_from_pdf(uploaded_file)
