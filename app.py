@@ -1,68 +1,89 @@
-import streamlit as st
-from pyPDF2 import PdfReader
-from langchain.text_splitter import RecursiveCharacterTextSplitter
 import os
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
-
-import google.generativeai as genai
-
-from langchain.vectorstores import FAISS
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain.chains.question_answering import load_qa_chain
-from langchain.prompts import PromptTemplate
+import streamlit as st
+import PyPDF2
+import requests
 from dotenv import load_dotenv
 
-# Load environment variables from .env file
+# ========================
+# Load environment variables
+# ========================
 load_dotenv()
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+MODEL_NAME = "deepseek/deepseek-r1-distill-llama-70b:free"
 
-# Set up Google Generative AI API key
-genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
+# ========================
+# Helper Functions
+# ========================
+def extract_text_from_pdf(pdf_file):
+    pdf_reader = PyPDF2.PdfReader(pdf_file)
+    full_text = ""
+    for page in pdf_reader.pages:
+        text = page.extract_text()
+        if text:
+            full_text += text + "\n"
+    return full_text
 
-def get_pdf_text(pdf_docs):
-    text = ""
-    for pdf in pdf_docs:
-        pdf_reader = PdfReader(pdf)
-        for page in pdf_reader.pages:
-            text += page.extract_text()
-    return text
+def chunk_text(text, max_tokens=1500):
+    paragraphs = text.split("\n\n")
+    chunks = []
+    chunk = ""
+    for para in paragraphs:
+        if len(chunk + para) < max_tokens:
+            chunk += para + "\n\n"
+        else:
+            chunks.append(chunk.strip())
+            chunk = para + "\n\n"
+    if chunk:
+        chunks.append(chunk.strip())
+    return chunks
 
-def get_text_chunks(text):
-    text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=10000,
-        chunk_overlap=1000,
-    )
-    return text_splitter.split_text(text)
+def ask_deepseek(question, context):
+    headers = {
+        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Content-Type": "application/json",
+    }
 
-def get_vector_store(text_chunks):
-    embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
-    vector_store = FAISS.from_texts(text_chunks, embedding=embeddings)
-    vector_store.save_local("faiss_index")
+    payload = {
+        "model": MODEL_NAME,
+        "messages": [
+            {
+                "role": "system",
+                "content": "You are a helpful assistant that answers questions based on the context from a PDF."
+            },
+            {
+                "role": "user",
+                "content": f"Context:\n{context}\n\nQuestion: {question}"
+            }
+        ]
+    }
 
+    response = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=payload)
 
-def get_conversational_chain():
-    prompt_template ="""
-    You are a helpful assistant. Use the following context to answer the question as detailed as possible.dont provide any wrong information.
-    Context: \n{context}?\n
-    Question: \n{question}\n
-    Answer: Let's think step by step.
-    """
-    model=ChatGoogleGenerativeAI(model="gemini-pro",temperature=0.3)
-    prompt=PromptTemplate(template=prompt_template, input_variables=["Context", "Question"])
-    chain = load_qa_chain(model, chain_type="stuff", prompt=prompt)
-    return chain
+    if response.status_code == 200:
+        return response.json()["choices"][0]["message"]["content"]
+    else:
+        return f"Error: {response.status_code} - {response.text}"
 
-def user_input(user_question):
-    embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
+# ========================
+# Streamlit UI
+# ========================
+st.set_page_config(page_title="📄 PDF Chatbot with DeepSeek", layout="wide")
+st.title("📄🤖 PDF Chatbot using DeepSeek (via OpenRouter)")
 
-    new_db=FAISS.load_local("faiss_index", embeddings)
-    docs = new_db.similarity_search(user_question)
-    chain = get_conversational_chain()
+uploaded_file = st.file_uploader("Upload a PDF file", type="pdf")
 
-    response=chain(
-        {"input_documents": docs, "question": user_question},
-        return_only_outputs=True
+if uploaded_file:
+    with st.spinner("Extracting text from PDF..."):
+        full_text = extract_text_from_pdf(uploaded_file)
+        chunks = chunk_text(full_text)
 
-    )
+    st.success("PDF processed successfully! Ask your question below.")
 
-    print(response)
-    st.write("Reply: ", response['output_text'])
+    question = st.text_input("Ask a question based on the uploaded PDF:")
+
+    if question:
+        context = "\n\n".join(chunks[:3])  # Use first few chunks
+        with st.spinner("Fetching answer from DeepSeek..."):
+            answer = ask_deepseek(question, context)
+        st.markdown("### 🤖 Answer:")
+        st.write(answer)
